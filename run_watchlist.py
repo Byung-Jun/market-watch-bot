@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
-"""주간 시장 워치리스트 러너.
+"""주간 시장 워치리스트 러너 — SPCX 1종목 테스트 버전.
 
-TradingAgents로 워치리스트 종목을 하나씩 분석하고,
-종목별 BUY/SELL/HOLD 요약 + 전체 리포트 파일을 텔레그램으로 보낸다.
-GitHub Actions에서 주 1회(일요일 밤) 자동 실행되도록 설계됨.
-
-키(GOOGLE_API_KEY / TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID)는
-코드에 적지 않고 GitHub Secrets에서 환경변수로 주입받는다.
+무료 Gemini 한도(하루 20요청) 안에서 퀄을 확인하기 위해
+종목 1개 + 토론 0라운드로 호출을 최소화한 설정.
+퀄 확인 후 종목을 다시 늘리거나 billing 결정을 하면 됨.
 """
 
 import os
@@ -20,25 +17,20 @@ import requests
 #  여기만 편집하면 됨 (EDIT HERE)
 # ════════════════════════════════════════════════════════════════
 
-# 워치리스트 — 테마별로 묶음. 종목 추가/삭제는 여기서.
-# 한국 주식은 .KS(코스피)/.KQ(코스닥) 접미사. 미국은 그대로.
+# 테스트: SPCX 1종목만. 퀄 확인 후 아래에 종목 추가하면 됨.
 WATCHLIST = {
-    "AI": ["NVDA", "AVGO", "TSM", "GOOGL", "MSFT", "META"],
-    "반도체/메모리": ["005930.KS", "000660.KS"],
-    "SpaceX/우주": ["SPCX", "RKLB"],
-    "방산": ["LMT", "012450.KS", "047810.KS"],
-    "UAM": ["JOBY", "ACHR"],
-    "멀티": ["TSLA"],
+    "테스트": ["SPCX"],
 }
 
-# 모델 — 둘 다 무료 티어 가능(2.5 Flash 계열).
-# 품질 더 원하면 DEEP_THINK_MODEL만 유료 모델로 바꿔도 됨.
-DEEP_THINK_MODEL = "gemini-2.5-flash"        # 추론(불/베어 토론 등)
-QUICK_THINK_MODEL = "gemini-2.5-flash-lite"  # 잡일(데이터 수집 등), RPM 한도 높음
-MAX_DEBATE_ROUNDS = 1                          # 토론 라운드. 늘리면 품질↑ 호출↑
+# 모델 — 무료 티어 가능(2.5 Flash 계열).
+DEEP_THINK_MODEL = "gemini-2.5-flash"
+QUICK_THINK_MODEL = "gemini-2.5-flash-lite"
 
-# 종목 사이 대기(초). Gemini 무료 분당 한도(약 10 RPM) 완화용.
-SLEEP_BETWEEN_TICKERS = 30
+# 호출 최소화: 토론 0라운드 (불/베어 토론 생략 → 호출 대폭 감소)
+MAX_DEBATE_ROUNDS = 0
+
+# 종목 사이 대기(초). 1종목이라 짧게.
+SLEEP_BETWEEN_TICKERS = 5
 
 # ════════════════════════════════════════════════════════════════
 #  아래부터는 건드릴 필요 없음
@@ -62,7 +54,6 @@ def check_env():
 
 
 def latest_trading_date():
-    """가장 최근 평일(주말이면 금요일로 롤백)."""
     d = date.today()
     while d.weekday() >= 5:   # 5=토, 6=일
         d -= timedelta(days=1)
@@ -70,7 +61,6 @@ def latest_trading_date():
 
 
 def extract_signal(text):
-    """결정 텍스트에서 신호와 이모지를 추출."""
     t = (text or "").upper()
     if "STRONG SELL" in t:
         return "🔴", "STRONG SELL"
@@ -84,7 +74,6 @@ def extract_signal(text):
 
 
 def analyze_ticker(ta, ticker, analysis_date, retries=2):
-    """한 종목 분석. 실패 시 백오프 재시도. (전체텍스트, 신호, 이모지) 반환."""
     last_err = None
     for attempt in range(1, retries + 2):
         try:
@@ -99,12 +88,12 @@ def analyze_ticker(ta, ticker, analysis_date, retries=2):
         except Exception as e:                       # noqa: BLE001
             last_err = e
             print(f"[WARN] {ticker} 시도 {attempt} 실패: {e}")
-            time.sleep(20 * attempt)                 # 레이트리밋 백오프
+            time.sleep(20 * attempt)
     raise last_err
 
 
 def send_message(text):
-    for i in range(0, len(text), 4000):              # 4096자 제한 → 분할
+    for i in range(0, len(text), 4000):
         chunk = text[i:i + 4000]
         try:
             r = requests.post(
