@@ -1,0 +1,47 @@
+name: Weekly Market Watch
+
+on:
+  schedule:
+    # 매주 일요일 13:00 UTC = 한국시간 일요일 밤 22:00
+    - cron: "0 13 * * 0"
+  workflow_dispatch: {}   # Actions 탭에서 수동 실행 버튼
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+          pip install "git+https://github.com/TauricResearch/TradingAgents.git"
+          # AQ. Gemini 키 호환을 위해 구글 통합 최신화
+          pip install -U langchain-google-genai google-genai
+
+      - name: Run watchlist
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          # 데이터가 부족하면 아래 시크릿을 추가로 넣고 주석 해제 (선택)
+          # ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
+        run: python run_watchlist.py
+
+      - name: Notify on failure
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="⚠️ 주간 워치리스트 실행 실패. GitHub Actions 로그를 확인하세요."
