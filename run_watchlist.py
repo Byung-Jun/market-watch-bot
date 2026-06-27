@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""주간 시장 워치리스트 러너 — SPCX 1종목 테스트 버전.
+"""주간 시장 워치리스트 러너 — OpenRouter 버전 (SPCX 1종목 테스트).
 
-무료 Gemini 한도(하루 20요청) 안에서 퀄을 확인하기 위해
-종목 1개 + 토론 0라운드로 호출을 최소화한 설정.
-퀄 확인 후 종목을 다시 늘리거나 billing 결정을 하면 됨.
+무료 OpenRouter 모델(:free)로 TradingAgents를 돌린다.
+무료 한도(하루 50요청)를 고려해 종목 1개 + 토론 0라운드로 호출 최소화.
+키는 GitHub Secrets에서 OPENROUTER_API_KEY로 주입받는다.
 """
 
 import os
@@ -17,34 +17,40 @@ import requests
 #  여기만 편집하면 됨 (EDIT HERE)
 # ════════════════════════════════════════════════════════════════
 
-# 테스트: SPCX 1종목만. 퀄 확인 후 아래에 종목 추가하면 됨.
+# 테스트: SPCX 1종목만.
 WATCHLIST = {
     "테스트": ["SPCX"],
 }
 
-# 모델 — 무료 티어 가능(2.5 Flash 계열).
-DEEP_THINK_MODEL = "gemini-2.5-flash"
-QUICK_THINK_MODEL = "gemini-2.5-flash-lite"
+# OpenRouter 무료 모델 (도구 호출 지원 모델로 선택).
+# 만약 이 모델이 안 되면 openrouter.ai/models 에서
+# Price=Free + supported_parameters=tools 로 필터해서 다른 :free 모델로 교체.
+DEEP_THINK_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
+QUICK_THINK_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
 
-# 호출 최소화: 토론 0라운드 (불/베어 토론 생략 → 호출 대폭 감소)
+# 호출 최소화: 토론 0라운드
 MAX_DEBATE_ROUNDS = 0
 
-# 종목 사이 대기(초). 1종목이라 짧게.
+# 종목 사이 대기(초). OpenRouter 무료 분당 20요청 → 여유롭게.
 SLEEP_BETWEEN_TICKERS = 5
 
 # ════════════════════════════════════════════════════════════════
 #  아래부터는 건드릴 필요 없음
 # ════════════════════════════════════════════════════════════════
 
-GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
+# TradingAgents가 OpenAI 호환 경로로 키를 읽는 경우를 대비해 같은 값 복사
+if OPENROUTER_API_KEY:
+    os.environ["OPENAI_API_KEY"] = OPENROUTER_API_KEY
+
 
 def check_env():
     missing = [n for n, v in {
-        "GOOGLE_API_KEY": GOOGLE_API_KEY,
+        "OPENROUTER_API_KEY": OPENROUTER_API_KEY,
         "TELEGRAM_BOT_TOKEN": TELEGRAM_BOT_TOKEN,
         "TELEGRAM_CHAT_ID": TELEGRAM_CHAT_ID,
     }.items() if not v]
@@ -55,7 +61,7 @@ def check_env():
 
 def latest_trading_date():
     d = date.today()
-    while d.weekday() >= 5:   # 5=토, 6=일
+    while d.weekday() >= 5:
         d -= timedelta(days=1)
     return d.strftime("%Y-%m-%d")
 
@@ -113,7 +119,7 @@ def send_document(path, caption=""):
             r = requests.post(
                 f"{TELEGRAM_API}/sendDocument",
                 data={"chat_id": TELEGRAM_CHAT_ID, "caption": caption[:1000]},
-                files={"document": f},
+                files={"document": (os.path.basename(path), f, "text/markdown; charset=utf-8")},
                 timeout=120,
             )
         if not r.ok:
@@ -136,7 +142,8 @@ def main():
         sys.exit(1)
 
     config = DEFAULT_CONFIG.copy()
-    config["llm_provider"] = "google"
+    config["llm_provider"] = "openrouter"
+    config["backend_url"] = "https://openrouter.ai/api/v1"
     config["deep_think_llm"] = DEEP_THINK_MODEL
     config["quick_think_llm"] = QUICK_THINK_MODEL
     config["max_debate_rounds"] = MAX_DEBATE_ROUNDS
