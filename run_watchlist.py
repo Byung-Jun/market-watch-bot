@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-"""주간 시장 워치리스트 러너 — OpenRouter 버전 (SPCX 1종목 테스트).
-
-무료 OpenRouter 모델(:free)로 TradingAgents를 돌린다.
-무료 한도(하루 50요청)를 고려해 종목 1개 + 토론 0라운드로 호출 최소화.
-키는 GitHub Secrets에서 OPENROUTER_API_KEY로 주입받는다.
-"""
+"""주간 시장 워치리스트 러너 — OpenRouter(DeepSeek 무료) / SPCX 1종목 테스트."""
 
 import os
 import sys
@@ -17,21 +12,17 @@ import requests
 #  여기만 편집하면 됨 (EDIT HERE)
 # ════════════════════════════════════════════════════════════════
 
-# 테스트: SPCX 1종목만.
 WATCHLIST = {
     "테스트": ["SPCX"],
 }
 
-# OpenRouter 무료 모델 (도구 호출 지원 모델로 선택).
-# 만약 이 모델이 안 되면 openrouter.ai/models 에서
-# Price=Free + supported_parameters=tools 로 필터해서 다른 :free 모델로 교체.
-DEEP_THINK_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
-QUICK_THINK_MODEL = "meta-llama/llama-3.3-70b-instruct:free"
+# OpenRouter 무료 모델 (DeepSeek - 도구 호출 지원, 보통 더 안정적).
+# 이것도 붐벼서 막히면 openrouter.ai/models 에서
+# Price=Free + supported_parameters=tools 필터로 다른 :free 모델 교체.
+DEEP_THINK_MODEL = "deepseek/deepseek-chat-v3:free"
+QUICK_THINK_MODEL = "deepseek/deepseek-chat-v3:free"
 
-# 호출 최소화: 토론 0라운드
 MAX_DEBATE_ROUNDS = 0
-
-# 종목 사이 대기(초). OpenRouter 무료 분당 20요청 → 여유롭게.
 SLEEP_BETWEEN_TICKERS = 5
 
 # ════════════════════════════════════════════════════════════════
@@ -43,7 +34,6 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
-# TradingAgents가 OpenAI 호환 경로로 키를 읽는 경우를 대비해 같은 값 복사
 if OPENROUTER_API_KEY:
     os.environ["OPENAI_API_KEY"] = OPENROUTER_API_KEY
 
@@ -91,7 +81,7 @@ def analyze_ticker(ta, ticker, analysis_date, retries=2):
             full_text = final or decision_text
             emoji, signal = extract_signal(full_text)
             return full_text, signal, emoji
-        except Exception as e:                       # noqa: BLE001
+        except Exception as e:
             last_err = e
             print(f"[WARN] {ticker} 시도 {attempt} 실패: {e}")
             time.sleep(20 * attempt)
@@ -109,7 +99,7 @@ def send_message(text):
             )
             if not r.ok:
                 print(f"[WARN] 텔레그램 메시지 실패: {r.status_code} {r.text}")
-        except Exception as e:                       # noqa: BLE001
+        except Exception as e:
             print(f"[WARN] 텔레그램 메시지 예외: {e}")
 
 
@@ -124,7 +114,7 @@ def send_document(path, caption=""):
             )
         if not r.ok:
             print(f"[WARN] 텔레그램 파일 실패: {r.status_code} {r.text}")
-    except Exception as e:                           # noqa: BLE001
+    except Exception as e:
         print(f"[WARN] 텔레그램 파일 예외: {e}")
 
 
@@ -136,7 +126,7 @@ def main():
     try:
         from tradingagents.graph.trading_graph import TradingAgentsGraph
         from tradingagents.default_config import DEFAULT_CONFIG
-    except Exception as e:                           # noqa: BLE001
+    except Exception as e:
         print(f"[FATAL] TradingAgents import 실패: {e}")
         send_message(f"⚠️ 워치리스트 봇: TradingAgents 임포트 실패\n{e}")
         sys.exit(1)
@@ -165,7 +155,7 @@ def main():
                 summary.append(f"{emoji} {ticker} — {signal}")
                 report.append(f"### {ticker} — {signal}\n\n{full_text}\n")
                 ok += 1
-            except Exception as e:                   # noqa: BLE001
+            except Exception as e:
                 summary.append(f"⚪ {ticker} — 분석 실패")
                 report.append(f"### {ticker} — 분석 실패\n\n```\n{e}\n```\n")
                 fail += 1
