@@ -171,7 +171,8 @@ def main():
     summary.append("※ 연구용 분석이며 투자 조언이 아님.")
 
     report_path = f"report_{analysis_date}.md"
-    with open(report_path, "w", encoding="utf-8") as f:
+    # utf-8-sig(BOM): Windows 메모장 등에서 한글 깨짐 방지
+    with open(report_path, "w", encoding="utf-8-sig") as f:
         f.write("\n".join(report))
 
     send_message("\n".join(summary))
