@@ -16,11 +16,13 @@ WATCHLIST = {
     "테스트": ["SPCX"],
 }
 
-# OpenRouter 무료 모델 (DeepSeek - 도구 호출 지원, 보통 더 안정적).
-# 이것도 붐벼서 막히면 openrouter.ai/models 에서
+# OpenRouter 무료 모델 (2026-07 기준 무료 + tools 지원 확인됨).
+# ※ deepseek/deepseek-chat-v3:free 는 무료 제공 중단됨 (404) — 교체함.
+# 이것도 막히면 openrouter.ai/models 에서
 # Price=Free + supported_parameters=tools 필터로 다른 :free 모델 교체.
-DEEP_THINK_MODEL = "deepseek/deepseek-chat-v3:free"
-QUICK_THINK_MODEL = "deepseek/deepseek-chat-v3:free"
+# 대안: meta-llama/llama-3.3-70b-instruct:free, qwen/qwen3-next-80b-a3b-instruct:free
+DEEP_THINK_MODEL = "openai/gpt-oss-120b:free"
+QUICK_THINK_MODEL = "openai/gpt-oss-120b:free"
 
 MAX_DEBATE_ROUNDS = 0
 SLEEP_BETWEEN_TICKERS = 5
