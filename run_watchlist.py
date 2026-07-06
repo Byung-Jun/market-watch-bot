@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """주간 시장 워치리스트 러너 — OpenRouter(DeepSeek 무료) / SPCX 1종목 테스트."""
 
+import json
 import os
 import re
 import sys
@@ -182,6 +183,45 @@ def send_document(path, caption=""):
         print(f"[WARN] 텔레그램 파일 예외: {e}")
 
 
+# 한글 등급 라벨 → summary.json용 영문 코드 (premium-content 파이프라인이 소비)
+KO_TO_CODE = {
+    "매수": "BUY",
+    "비중확대": "OVERWEIGHT",
+    "보유": "HOLD",
+    "비중축소": "UNDERWEIGHT",
+    "매도": "SELL",
+    "중립": "NEUTRAL",
+    "판단불가": "UNKNOWN",
+}
+
+
+def save_reports(collected, analysis_date, model, out_dir="reports"):
+    """premium-content 파이프라인이 읽는 구조로 리포트를 저장한다.
+
+    reports/YYYY-MM-DD/{summary.json, <TICKER>.md}
+    summary.json: {"date", "model", "signals": [{"ticker", "rating", "rating_ko"}]}
+    """
+    day_dir = os.path.join(out_dir, analysis_date)
+    os.makedirs(day_dir, exist_ok=True)
+
+    signals = []
+    for item in collected:
+        signals.append({
+            "ticker": item["ticker"],
+            "rating": KO_TO_CODE.get(item["signal"], "UNKNOWN"),
+            "rating_ko": item["signal"],
+        })
+        with open(os.path.join(day_dir, f"{item['ticker']}.md"), "w", encoding="utf-8") as f:
+            f.write(item["text"])
+
+    with open(os.path.join(day_dir, "summary.json"), "w", encoding="utf-8") as f:
+        json.dump(
+            {"date": analysis_date, "model": model, "signals": signals},
+            f, ensure_ascii=False, indent=2,
+        )
+    return day_dir
+
+
 def main():
     check_env()
     analysis_date = latest_trading_date()
@@ -219,6 +259,7 @@ def main():
 
     summary = [f"📊 주간 시장 리포트 ({analysis_date} 기준)", ""]
     report = [f"# 주간 시장 리포트 ({analysis_date} 기준)\n"]
+    collected = []  # save_reports용 — 분석 성공 종목만 담는다
     ok = fail = 0
 
     for theme, tickers in WATCHLIST.items():
@@ -247,6 +288,7 @@ def main():
             if err is None:
                 summary.append(f"{emoji} {ticker} — {signal}")
                 report.append(f"### {ticker} — {signal}\n\n{full_text}\n")
+                collected.append({"ticker": ticker, "signal": signal, "text": full_text})
                 ok += 1
             else:
                 summary.append(f"⚪ {ticker} — 분석 실패")
@@ -265,6 +307,10 @@ def main():
     # utf-8-sig(BOM): Windows 메모장 등에서 한글 깨짐 방지
     with open(report_path, "w", encoding="utf-8-sig") as f:
         f.write("\n".join(report))
+
+    if collected:
+        day_dir = save_reports(collected, analysis_date, model=", ".join(sorted(tried_models)))
+        print(f"리포트 저장: {day_dir}")
 
     send_message("\n".join(summary))
     send_document(report_path, caption=f"전체 리포트 ({analysis_date})")
