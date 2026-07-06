@@ -55,9 +55,17 @@ def check_env():
         sys.exit(1)
 
 
-def pick_available_model():
+def is_rate_limit_error(exc):
+    """무료 풀 혼잡/쿼터 초과(429) 계열 에러인지 판별."""
+    s = str(exc).lower()
+    return "429" in s or "rate limit" in s or "rate-limited" in s
+
+
+def pick_available_model(exclude=frozenset()):
     """후보 목록에서 지금 응답 가능한 무료 모델을 골라 반환. 전부 막히면 None."""
     for model in MODEL_CANDIDATES:
+        if model in exclude:
+            continue
         try:
             r = requests.post(
                 "https://openrouter.ai/api/v1/chat/completions",
@@ -139,7 +147,8 @@ def analyze_ticker(ta, ticker, analysis_date, retries=2):
         except Exception as e:
             last_err = e
             print(f"[WARN] {ticker} 시도 {attempt} 실패: {e}")
-            time.sleep(20 * attempt)
+            # 무료 풀 혼잡의 Retry-After가 보통 30초 안팎이라 그보다 길게 대기
+            time.sleep(40 * attempt)
     raise last_err
 
 
@@ -192,16 +201,21 @@ def main():
         send_message("⚠️ 워치리스트 봇: 무료 모델이 전부 혼잡/차단 상태입니다. 다음 실행 때 재시도합니다.")
         sys.exit(1)
 
-    config = DEFAULT_CONFIG.copy()
-    config["llm_provider"] = "openrouter"
-    config["backend_url"] = "https://openrouter.ai/api/v1"
-    config["deep_think_llm"] = model
-    config["quick_think_llm"] = model
-    config["max_debate_rounds"] = MAX_DEBATE_ROUNDS
-    config["online_tools"] = True
-    config["output_language"] = "Korean"  # 리포트 본문 한국어 (등급 줄은 영어 고정)
+    def make_graph(m):
+        config = DEFAULT_CONFIG.copy()
+        config["llm_provider"] = "openrouter"
+        config["backend_url"] = "https://openrouter.ai/api/v1"
+        config["deep_think_llm"] = m
+        config["quick_think_llm"] = m
+        config["max_debate_rounds"] = MAX_DEBATE_ROUNDS
+        config["online_tools"] = True
+        config["output_language"] = "Korean"  # 리포트 본문 한국어 (등급 줄은 영어 고정)
+        # SDK 레벨 재시도 — Retry-After를 존중하므로 무료 풀 혼잡(429)을 견딤
+        config["llm_max_retries"] = 5
+        return TradingAgentsGraph(debug=False, config=config)
 
-    ta = TradingAgentsGraph(debug=False, config=config)
+    ta = make_graph(model)
+    tried_models = {model}
 
     summary = [f"📊 주간 시장 리포트 ({analysis_date} 기준)", ""]
     report = [f"# 주간 시장 리포트 ({analysis_date} 기준)\n"]
@@ -212,16 +226,33 @@ def main():
         report.append(f"\n## {theme}\n")
         for ticker in tickers:
             print(f"--- {ticker} 분석 중 ---")
-            try:
-                full_text, signal, emoji = analyze_ticker(ta, ticker, analysis_date)
+            err = None
+            # 현재 모델로 시도하고, 무료 풀 혼잡(429)이 계속되면
+            # 아직 안 써본 후보 모델로 갈아타며 재시도
+            while True:
+                try:
+                    full_text, signal, emoji = analyze_ticker(ta, ticker, analysis_date)
+                    err = None
+                    break
+                except Exception as e:
+                    err = e
+                    if not is_rate_limit_error(e):
+                        break
+                    alt = pick_available_model(exclude=tried_models)
+                    if not alt:
+                        break
+                    print(f"[INFO] 무료 풀 혼잡 → 모델 교체 후 재시도: {alt}")
+                    tried_models.add(alt)
+                    ta = make_graph(alt)
+            if err is None:
                 summary.append(f"{emoji} {ticker} — {signal}")
                 report.append(f"### {ticker} — {signal}\n\n{full_text}\n")
                 ok += 1
-            except Exception as e:
+            else:
                 summary.append(f"⚪ {ticker} — 분석 실패")
-                report.append(f"### {ticker} — 분석 실패\n\n```\n{e}\n```\n")
+                report.append(f"### {ticker} — 분석 실패\n\n```\n{err}\n```\n")
                 fail += 1
-                print(f"[ERROR] {ticker} 최종 실패: {e}")
+                print(f"[ERROR] {ticker} 최종 실패: {err}")
             time.sleep(SLEEP_BETWEEN_TICKERS)
         summary.append("")
 

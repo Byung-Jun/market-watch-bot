@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
-"""extract_signal 파서 테스트 — python3 -m unittest test_extract_signal"""
+"""run_watchlist 단위 테스트 — python3 -m unittest test_extract_signal"""
 
 import unittest
+from unittest import mock
 
-from run_watchlist import extract_signal
+import run_watchlist
+from run_watchlist import extract_signal, is_rate_limit_error, pick_available_model
 
 
 class TestExtractSignal(unittest.TestCase):
@@ -43,6 +45,40 @@ class TestExtractSignal(unittest.TestCase):
     def test_empty_and_none(self):
         self.assertEqual(extract_signal(""), ("⚪", "판단불가"))
         self.assertEqual(extract_signal(None), ("⚪", "판단불가"))
+
+
+class TestIsRateLimitError(unittest.TestCase):
+    def test_openrouter_429(self):
+        # 2026-07-06 실제 실행에서 발생한 에러 형태
+        e = Exception(
+            "Error code: 429 - {'error': {'message': 'Provider returned error', "
+            "'code': 429, 'metadata': {'raw': 'meta-llama/llama-3.3-70b-instruct:free "
+            "is temporarily rate-limited upstream.'}}}"
+        )
+        self.assertTrue(is_rate_limit_error(e))
+
+    def test_rate_limit_text(self):
+        self.assertTrue(is_rate_limit_error(Exception("Rate limit exceeded")))
+
+    def test_other_error(self):
+        self.assertFalse(is_rate_limit_error(Exception("connection reset by peer")))
+
+
+class TestPickAvailableModelExclude(unittest.TestCase):
+    def _fake_post(self, *args, **kwargs):
+        self.probed.append(kwargs["json"]["model"])
+        return mock.Mock(ok=True)
+
+    def setUp(self):
+        self.probed = []
+
+    def test_exclude_skips_candidates(self):
+        first, second = run_watchlist.MODEL_CANDIDATES[:2]
+        with mock.patch.object(run_watchlist.requests, "post", self._fake_post), \
+             mock.patch.object(run_watchlist.time, "sleep"):
+            picked = pick_available_model(exclude={first})
+        self.assertEqual(picked, second)
+        self.assertNotIn(first, self.probed)
 
 
 if __name__ == "__main__":
