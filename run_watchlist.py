@@ -2,6 +2,7 @@
 """주간 시장 워치리스트 러너 — OpenRouter(DeepSeek 무료) / SPCX 1종목 테스트."""
 
 import os
+import re
 import sys
 import time
 from datetime import date, timedelta
@@ -85,16 +86,41 @@ def latest_trading_date():
     return d.strftime("%Y-%m-%d")
 
 
+# TradingAgents 5단계 등급 → 이모지/한글 라벨.
+# structured output이 실패하면 자유 텍스트 폴백이 한국어로 응답할 수 있어
+# (output_language=Korean) 한국어 등급 단어도 함께 인식한다.
+RATING_MAP = {
+    "BUY": ("🟢", "매수"),
+    "OVERWEIGHT": ("🟢", "비중확대"),
+    "HOLD": ("🟡", "보유"),
+    "UNDERWEIGHT": ("🔴", "비중축소"),
+    "SELL": ("🔴", "매도"),
+    "NEUTRAL": ("🟡", "중립"),
+    "비중확대": ("🟢", "비중확대"),
+    "비중축소": ("🔴", "비중축소"),
+    "매수": ("🟢", "매수"),
+    "매도": ("🔴", "매도"),
+    "보유": ("🟡", "보유"),
+    "중립": ("🟡", "중립"),
+}
+
+# "**Rating**: Overweight" / "Rating - Buy" 등 관대하게 매칭
+RATING_LABEL_RE = re.compile(r"rating.*?[:\-][\s*]*(\w+)", re.IGNORECASE)
+
+
 def extract_signal(text):
-    t = (text or "").upper()
-    if "STRONG SELL" in t:
-        return "🔴", "STRONG SELL"
-    if "STRONG BUY" in t:
-        return "🟢", "STRONG BUY"
-    for kw, emoji in [("SELL", "🔴"), ("BUY", "🟢"),
-                      ("HOLD", "🟡"), ("NEUTRAL", "🟡")]:
-        if kw in t:
-            return emoji, kw
+    """최종 결정문에서 5단계 등급 추출. Rating 줄 우선, 없으면 본문 키워드 스캔."""
+    t = text or ""
+    for line in t.splitlines():
+        m = RATING_LABEL_RE.search(line)
+        if m and m.group(1).upper() in RATING_MAP:
+            return RATING_MAP[m.group(1).upper()]
+    up = t.upper()
+    # 긴/구체적인 키워드 먼저 (비중확대 안의 '매수' 오매칭 등 방지)
+    for kw in ("OVERWEIGHT", "UNDERWEIGHT", "SELL", "BUY", "HOLD", "NEUTRAL",
+               "비중확대", "비중축소", "매수", "매도", "보유", "중립"):
+        if kw in up:
+            return RATING_MAP[kw]
     return "⚪", "판단불가"
 
 
@@ -173,6 +199,7 @@ def main():
     config["quick_think_llm"] = model
     config["max_debate_rounds"] = MAX_DEBATE_ROUNDS
     config["online_tools"] = True
+    config["output_language"] = "Korean"  # 리포트 본문 한국어 (등급 줄은 영어 고정)
 
     ta = TradingAgentsGraph(debug=False, config=config)
 
