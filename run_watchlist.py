@@ -16,13 +16,16 @@ WATCHLIST = {
     "테스트": ["SPCX"],
 }
 
-# OpenRouter 무료 모델 (2026-07 기준 무료 + tools 지원 확인됨).
-# ※ deepseek/deepseek-chat-v3:free 는 무료 제공 중단됨 (404) — 교체함.
-# 이것도 막히면 openrouter.ai/models 에서
-# Price=Free + supported_parameters=tools 필터로 다른 :free 모델 교체.
-# 대안: meta-llama/llama-3.3-70b-instruct:free, qwen/qwen3-next-80b-a3b-instruct:free
-DEEP_THINK_MODEL = "openai/gpt-oss-120b:free"
-QUICK_THINK_MODEL = "openai/gpt-oss-120b:free"
+# OpenRouter 무료 모델 후보 (2026-07 기준 무료 + tools 지원 확인됨).
+# 무료 풀은 혼잡도가 수시로 변하므로, 실행 시점에 위에서부터 살아있는
+# 모델을 골라 사용함. 전부 막히면 openrouter.ai/models 에서
+# Price=Free + supported_parameters=tools 필터로 목록 갱신.
+MODEL_CANDIDATES = [
+    "openai/gpt-oss-120b:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "qwen/qwen3-next-80b-a3b-instruct:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+]
 
 MAX_DEBATE_ROUNDS = 0
 SLEEP_BETWEEN_TICKERS = 5
@@ -49,6 +52,30 @@ def check_env():
     if missing:
         print(f"[FATAL] 누락된 시크릿: {', '.join(missing)}")
         sys.exit(1)
+
+
+def pick_available_model():
+    """후보 목록에서 지금 응답 가능한 무료 모델을 골라 반환. 전부 막히면 None."""
+    for model in MODEL_CANDIDATES:
+        try:
+            r = requests.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": 1,
+                },
+                timeout=60,
+            )
+            if r.ok:
+                print(f"[INFO] 사용 모델: {model}")
+                return model
+            print(f"[WARN] {model} 사용 불가: {r.status_code} {r.text[:200]}")
+        except Exception as e:
+            print(f"[WARN] {model} 프로브 실패: {e}")
+        time.sleep(2)
+    return None
 
 
 def latest_trading_date():
@@ -133,11 +160,17 @@ def main():
         send_message(f"⚠️ 워치리스트 봇: TradingAgents 임포트 실패\n{e}")
         sys.exit(1)
 
+    model = pick_available_model()
+    if not model:
+        print("[FATAL] 사용 가능한 무료 모델 없음")
+        send_message("⚠️ 워치리스트 봇: 무료 모델이 전부 혼잡/차단 상태입니다. 다음 실행 때 재시도합니다.")
+        sys.exit(1)
+
     config = DEFAULT_CONFIG.copy()
     config["llm_provider"] = "openrouter"
     config["backend_url"] = "https://openrouter.ai/api/v1"
-    config["deep_think_llm"] = DEEP_THINK_MODEL
-    config["quick_think_llm"] = QUICK_THINK_MODEL
+    config["deep_think_llm"] = model
+    config["quick_think_llm"] = model
     config["max_debate_rounds"] = MAX_DEBATE_ROUNDS
     config["online_tools"] = True
 
