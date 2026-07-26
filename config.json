@@ -1,0 +1,19 @@
+{
+  "_comment": "run_watchlist.py 실행 설정 — 종목·모델·경로는 여기서 편집. 시크릿(OPENROUTER_API_KEY 등)은 절대 넣지 말 것(GitHub Secrets 사용).",
+  "watchlist": {
+    "테스트": ["SPCX"]
+  },
+  "_comment_models": "OpenRouter 무료 모델 후보 (2026-07 기준 무료 + tools 지원). 무료 풀 혼잡도가 수시로 변하므로 실행 시점에 위에서부터 살아있는 모델을 사용. 전부 막히면 openrouter.ai/models 에서 Price=Free + supported_parameters=tools 필터로 갱신.",
+  "model_candidates": [
+    "openai/gpt-oss-120b:free",
+    "meta-llama/llama-3.3-70b-instruct:free",
+    "qwen/qwen3-next-80b-a3b-instruct:free",
+    "nvidia/nemotron-3-super-120b-a12b:free"
+  ],
+  "max_debate_rounds": 0,
+  "sleep_between_tickers": 5,
+  "reports_dir": "reports",
+  "report_file_template": "report_{date}.md",
+  "output_language": "Korean",
+  "llm_max_retries": 5
+}

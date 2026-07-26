@@ -11,26 +11,64 @@ from datetime import date, timedelta
 import requests
 
 # ════════════════════════════════════════════════════════════════
-#  여기만 편집하면 됨 (EDIT HERE)
+#  설정 — 종목·모델·경로는 config.json에서 편집 (코드 수정 불필요)
 # ════════════════════════════════════════════════════════════════
 
-WATCHLIST = {
-    "테스트": ["SPCX"],
+DEFAULT_CONFIG_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "config.json"
+)
+
+
+# config.json이 없거나 깨졌을 때 쓰는 폴백 — 외부화 이전의 하드코딩 값과 동일.
+# 무료 풀은 혼잡도가 수시로 변하므로, 실행 시점에 위에서부터 살아있는 모델을
+# 골라 사용함. 전부 막히면 openrouter.ai/models 에서
+# Price=Free + supported_parameters=tools 필터로 config.json을 갱신.
+FALLBACK_CONFIG = {
+    "watchlist": {
+        "테스트": ["SPCX"],
+    },
+    "model_candidates": [
+        "openai/gpt-oss-120b:free",
+        "meta-llama/llama-3.3-70b-instruct:free",
+        "qwen/qwen3-next-80b-a3b-instruct:free",
+        "nvidia/nemotron-3-super-120b-a12b:free",
+    ],
+    "max_debate_rounds": 0,
+    "sleep_between_tickers": 5,
+    "reports_dir": "reports",
+    "report_file_template": "report_{date}.md",
+    "output_language": "Korean",
+    "llm_max_retries": 5,
 }
 
-# OpenRouter 무료 모델 후보 (2026-07 기준 무료 + tools 지원 확인됨).
-# 무료 풀은 혼잡도가 수시로 변하므로, 실행 시점에 위에서부터 살아있는
-# 모델을 골라 사용함. 전부 막히면 openrouter.ai/models 에서
-# Price=Free + supported_parameters=tools 필터로 목록 갱신.
-MODEL_CANDIDATES = [
-    "openai/gpt-oss-120b:free",
-    "meta-llama/llama-3.3-70b-instruct:free",
-    "qwen/qwen3-next-80b-a3b-instruct:free",
-    "nvidia/nemotron-3-super-120b-a12b:free",
-]
 
-MAX_DEBATE_ROUNDS = 0
-SLEEP_BETWEEN_TICKERS = 5
+def load_config(path=None):
+    """설정을 dict로 반환. 파일이 없거나 읽기 실패하면 FALLBACK_CONFIG로 폴백한다.
+
+    경로 우선순위: 인자 path > 환경변수 WATCHLIST_CONFIG > 스크립트 옆 config.json.
+    누락된 키는 FALLBACK_CONFIG 값으로 채운다.
+    """
+    path = path or os.environ.get("WATCHLIST_CONFIG") or DEFAULT_CONFIG_PATH
+    try:
+        with open(path, encoding="utf-8") as f:
+            cfg = json.load(f)
+    except FileNotFoundError:
+        print(f"[INFO] 설정 파일 없음({path}) — 내장 기본값으로 실행")
+        cfg = {}
+    except (OSError, ValueError) as e:
+        print(f"[WARN] 설정 파일 읽기 실패({path}): {e} — 내장 기본값으로 실행")
+        cfg = {}
+    # 주석용 "_"로 시작하는 키는 무시
+    cfg = {k: v for k, v in cfg.items() if not k.startswith("_")}
+    return {**FALLBACK_CONFIG, **cfg}
+
+
+# 모듈 레벨 상수 — 기존 임포트 경로(테스트 등) 호환용
+_config = load_config()
+WATCHLIST = _config["watchlist"]
+MODEL_CANDIDATES = _config["model_candidates"]
+MAX_DEBATE_ROUNDS = _config["max_debate_rounds"]
+SLEEP_BETWEEN_TICKERS = _config["sleep_between_tickers"]
 
 # ════════════════════════════════════════════════════════════════
 #  아래부터는 건드릴 필요 없음
@@ -62,9 +100,11 @@ def is_rate_limit_error(exc):
     return "429" in s or "rate limit" in s or "rate-limited" in s
 
 
-def pick_available_model(exclude=frozenset()):
+def pick_available_model(exclude=frozenset(), candidates=None):
     """후보 목록에서 지금 응답 가능한 무료 모델을 골라 반환. 전부 막히면 None."""
-    for model in MODEL_CANDIDATES:
+    if candidates is None:
+        candidates = MODEL_CANDIDATES
+    for model in candidates:
         if model in exclude:
             continue
         try:
@@ -222,7 +262,9 @@ def save_reports(collected, analysis_date, model, out_dir="reports"):
     return day_dir
 
 
-def main():
+def main(config=None, config_path=None):
+    """워치리스트 실행. config(dict)를 주입하거나 config_path로 로드 (기본: config.json)."""
+    cfg = config if config is not None else load_config(config_path)
     check_env()
     analysis_date = latest_trading_date()
     print(f"분석 기준일: {analysis_date}")
@@ -235,24 +277,24 @@ def main():
         send_message(f"⚠️ 워치리스트 봇: TradingAgents 임포트 실패\n{e}")
         sys.exit(1)
 
-    model = pick_available_model()
+    model = pick_available_model(candidates=cfg["model_candidates"])
     if not model:
         print("[FATAL] 사용 가능한 무료 모델 없음")
         send_message("⚠️ 워치리스트 봇: 무료 모델이 전부 혼잡/차단 상태입니다. 다음 실행 때 재시도합니다.")
         sys.exit(1)
 
     def make_graph(m):
-        config = DEFAULT_CONFIG.copy()
-        config["llm_provider"] = "openrouter"
-        config["backend_url"] = "https://openrouter.ai/api/v1"
-        config["deep_think_llm"] = m
-        config["quick_think_llm"] = m
-        config["max_debate_rounds"] = MAX_DEBATE_ROUNDS
-        config["online_tools"] = True
-        config["output_language"] = "Korean"  # 리포트 본문 한국어 (등급 줄은 영어 고정)
+        ta_config = DEFAULT_CONFIG.copy()
+        ta_config["llm_provider"] = "openrouter"
+        ta_config["backend_url"] = "https://openrouter.ai/api/v1"
+        ta_config["deep_think_llm"] = m
+        ta_config["quick_think_llm"] = m
+        ta_config["max_debate_rounds"] = cfg["max_debate_rounds"]
+        ta_config["online_tools"] = True
+        ta_config["output_language"] = cfg["output_language"]  # 리포트 본문 언어 (등급 줄은 영어 고정)
         # SDK 레벨 재시도 — Retry-After를 존중하므로 무료 풀 혼잡(429)을 견딤
-        config["llm_max_retries"] = 5
-        return TradingAgentsGraph(debug=False, config=config)
+        ta_config["llm_max_retries"] = cfg["llm_max_retries"]
+        return TradingAgentsGraph(debug=False, config=ta_config)
 
     ta = make_graph(model)
     tried_models = {model}
@@ -262,7 +304,7 @@ def main():
     collected = []  # save_reports용 — 분석 성공 종목만 담는다
     ok = fail = 0
 
-    for theme, tickers in WATCHLIST.items():
+    for theme, tickers in cfg["watchlist"].items():
         summary.append(f"[{theme}]")
         report.append(f"\n## {theme}\n")
         for ticker in tickers:
@@ -279,7 +321,7 @@ def main():
                     err = e
                     if not is_rate_limit_error(e):
                         break
-                    alt = pick_available_model(exclude=tried_models)
+                    alt = pick_available_model(exclude=tried_models, candidates=cfg["model_candidates"])
                     if not alt:
                         break
                     print(f"[INFO] 무료 풀 혼잡 → 모델 교체 후 재시도: {alt}")
@@ -295,7 +337,7 @@ def main():
                 report.append(f"### {ticker} — 분석 실패\n\n```\n{err}\n```\n")
                 fail += 1
                 print(f"[ERROR] {ticker} 최종 실패: {err}")
-            time.sleep(SLEEP_BETWEEN_TICKERS)
+            time.sleep(cfg["sleep_between_tickers"])
         summary.append("")
 
     summary.append(f"분석 완료 {ok}개 / 실패 {fail}개")
@@ -303,13 +345,17 @@ def main():
     summary.append("")
     summary.append("※ 연구용 분석이며 투자 조언이 아님.")
 
-    report_path = f"report_{analysis_date}.md"
+    report_path = cfg["report_file_template"].format(date=analysis_date)
     # utf-8-sig(BOM): Windows 메모장 등에서 한글 깨짐 방지
     with open(report_path, "w", encoding="utf-8-sig") as f:
         f.write("\n".join(report))
 
     if collected:
-        day_dir = save_reports(collected, analysis_date, model=", ".join(sorted(tried_models)))
+        day_dir = save_reports(
+            collected, analysis_date,
+            model=", ".join(sorted(tried_models)),
+            out_dir=cfg["reports_dir"],
+        )
         print(f"리포트 저장: {day_dir}")
 
     send_message("\n".join(summary))
