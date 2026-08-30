@@ -1,0 +1,11 @@
+{
+  "date": "2026-08-28",
+  "model": "nvidia/nemotron-3-super-120b-a12b:free",
+  "signals": [
+    {
+      "ticker": "SPCX",
+      "rating": "BUY",
+      "rating_ko": "매수"
+    }
+  ]
+}
