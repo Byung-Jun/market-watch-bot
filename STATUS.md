@@ -1,21 +1,9 @@
----
-status: paused
-kind: ongoing
-summary: 주간 시장 워치리스트 봇 (16종목 AI 분석 → 텔레그램)
-updated: 2026-07-26
----
+# Project Status
 
-## 단계
-- [x] 리포트 엔진
-- [x] 텔레그램 개인 열람
-- [>] 외부 발행
-- [ ] 수익화
+Status: Experimental / Active Development
 
-## 이슈
-- Phase 1 제외됨(2026-07-23) — 외부 발행 채널 없이 자산 보존만
+Market Watch Bot is currently an experimental project for exploring
+automated market monitoring and AI-assisted software development workflows.
 
-## 결정 필요
-- 재개 여부 (재개 트리거: 애드센스 승인 + 블로그 무개입 리듬 2주)
-
-## 비고
-- GitHub Actions 일요일 밤 자동 실행. 텔레그램 개인 열람 리포트만 유지
+The project is under active development and APIs, models, and workflows
+may change over time.
