@@ -1,48 +1,184 @@
-# 주간 시장 워치리스트 봇
+# Market Watch Bot
 
-TradingAgents로 워치리스트 16종목을 매주 분석해서 텔레그램으로 받는 봇.
-GitHub Actions에서 일요일 밤 자동 실행된다.
+AI-assisted weekly market analysis and monitoring bot.
 
-## 파일 구성
-- `run_watchlist.py` — 메인 러너 (종목·모델 설정은 파일 상단에서 편집)
-- `.github/workflows/weekly.yml` — 자동 실행 스케줄 + 수동 실행 버튼
+Market Watch Bot uses [TradingAgents](https://github.com/TauricResearch/TradingAgents) and OpenRouter-compatible LLMs to analyze a configurable watchlist and deliver the results through Telegram.
 
-## 준비 (GitHub Secrets)
-repo → **Settings → Secrets and variables → Actions → Repository secrets**에
-아래 3개 등록:
+The project is designed as a personal experiment in **AI-assisted software development and automated maintenance workflows**.
 
-| 이름 | 값 |
-|---|---|
-| `GOOGLE_API_KEY` | Gemini API 키 |
-| `TELEGRAM_BOT_TOKEN` | 텔레그램 봇 토큰 |
-| `TELEGRAM_CHAT_ID` | 텔레그램 chat id |
+## How it works
 
-## 첫 실행 (수동)
-1. repo **Actions** 탭
-2. 왼쪽에서 **Weekly Market Watch** 선택
-3. 오른쪽 **Run workflow** 버튼 → 실행
-4. 로그를 보며 진행 확인. 끝나면 텔레그램으로 리포트 도착.
+```text
+Watchlist
+    ↓
+TradingAgents
+    ↓
+LLM-based market analysis
+    ↓
+Investment signal extraction
+    ↓
+Markdown report
+    ↓
+Telegram notification
+```
 
-수동 실행으로 먼저 테스트한 뒤, 문제없으면 매주 자동으로 돈다.
+The workflow runs automatically through GitHub Actions on a weekly schedule.
 
-## 종목 바꾸기
-`run_watchlist.py` 상단 `WATCHLIST`만 수정. (한국 주식은 `.KS`/`.KQ` 접미사)
+## Features
 
-## 실행 주기 바꾸기
-`weekly.yml`의 `cron` 수정. 예) 평일 매일 → `"0 13 * * 1-5"` (UTC 기준).
+* Configurable stock watchlist
+* Automated weekly analysis
+* OpenRouter model selection with fallback models
+* Automatic retry for rate-limited models
+* Markdown report generation
+* JSON summary generation
+* Telegram notifications
+* GitHub Actions automation
+* Unit tests for core parsing and report-generation logic
 
-## 알아둘 점
-- **무료 티어 한도**: Gemini 무료는 분당 약 10회 제한이라, 종목 사이에 30초씩
-  쉬며 천천히 돈다. 16종목 한 번에 30~50분 걸릴 수 있음(정상).
-- **레이트리밋(429)이 잦으면**: Google Cloud에서 결제(billing)를 켜면 분당 한도가
-  크게 풀린다. Flash는 호출당 단가가 매우 낮아 주 1회 16종목이면 월 비용은 거의 없음.
-- **데이터 부족 시**: 기본은 Yahoo Finance(무료). 데이터 에러가 나면 Alpha Vantage
-  무료 키를 `ALPHA_VANTAGE_API_KEY` 시크릿으로 추가하고 `weekly.yml`의 주석 해제.
-- **AQ. Gemini 키**: 정상이다(새 표준). 워크플로가 최신 구글 SDK를 깔아 호환을 맞춘다.
-  혹시 401이 뜨면 키가 아니라 SDK 버전 문제.
-- **스케줄 지연**: GitHub Actions 예약 실행은 부하에 따라 수십 분 늦을 수 있고,
-  repo가 60일간 비활성이면 자동 실행이 멈춘다(아무 커밋이나 하면 재개).
+## AI Model Handling
 
-## 주의
-연구·참고용 분석이며 투자 조언이 아니다. 매수/매도 신호를 곧이곧대로 따르지 말 것.
-특히 신규 상장주(SPCX)·UAM 종목은 데이터가 얇아 분석이 부분적이다.
+The project can try multiple LLM candidates and automatically select an available model.
+
+This is particularly useful when using free or rate-limited model endpoints, where availability can change over time.
+
+Models are configured in `config.json` and can be changed without modifying the main Python code.
+
+## Configuration
+
+The watchlist and model candidates are configured in:
+
+```text
+config.json
+```
+
+Example:
+
+```json
+{
+  "watchlist": {
+    "Technology": ["NVDA", "MSFT"],
+    "ETF": ["VOO", "QQQ"]
+  }
+}
+```
+
+The current repository configuration is intentionally kept small for testing.
+
+## Required Secrets
+
+The following GitHub Actions secrets are required:
+
+| Secret               | Purpose                     |
+| -------------------- | --------------------------- |
+| `OPENROUTER_API_KEY` | LLM API access              |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot authentication |
+| `TELEGRAM_CHAT_ID`   | Destination chat            |
+
+Secrets are read from environment variables and are not stored in the repository.
+
+> Never commit API keys, bot tokens, passwords, or other credentials to the repository.
+
+## Running Locally
+
+```bash
+git clone https://github.com/Byung-Jun/market-watch-bot.git
+cd market-watch-bot
+
+python -m venv .venv
+```
+
+Activate the virtual environment and install dependencies:
+
+```bash
+pip install -r requirements.txt
+```
+
+Set the required environment variables:
+
+```bash
+export OPENROUTER_API_KEY="your-key"
+export TELEGRAM_BOT_TOKEN="your-token"
+export TELEGRAM_CHAT_ID="your-chat-id"
+```
+
+Then run:
+
+```bash
+python run_watchlist.py
+```
+
+## Testing
+
+Run the unit tests with:
+
+```bash
+python -m unittest discover
+```
+
+The repository currently includes tests for:
+
+* Investment signal extraction
+* Rate-limit handling
+* Model fallback selection
+* Report generation
+
+## GitHub Actions
+
+The workflow is located at:
+
+```text
+.github/workflows/weekly.yml
+```
+
+It can be triggered automatically by the weekly schedule or manually using `workflow_dispatch`.
+
+The workflow:
+
+1. Installs dependencies
+2. Runs the watchlist analysis
+3. Generates reports
+4. Commits generated reports
+5. Sends the result to Telegram
+
+## AI-Assisted Development
+
+This project is also an experiment in applying AI to the broader software development lifecycle.
+
+AI-assisted development is being explored for:
+
+* Requirement analysis
+* Code generation
+* Refactoring
+* Debugging
+* Test generation
+* Code review
+* Documentation
+* Issue analysis
+* Maintenance automation
+
+The long-term goal is to understand how coding agents can assist an individual maintainer with both **development and ongoing software maintenance**.
+
+## Roadmap
+
+* [ ] Expand the default watchlist
+* [ ] Improve report validation
+* [ ] Add more robust data-quality checks
+* [ ] Expand automated tests
+* [ ] Improve GitHub issue automation
+* [ ] Add AI-assisted issue triage
+* [ ] Add AI-assisted pull request review
+* [ ] Automate release notes and changelog generation
+* [ ] Document the AI-assisted maintenance workflow
+
+## Disclaimer
+
+This project is for research and educational purposes only.
+
+The generated reports are not financial advice and should not be used as the sole basis for investment decisions.
+
+Financial data and AI-generated analysis may contain errors or inaccuracies. Always independently verify information before making financial decisions.
+
+## License
+
+MIT License
